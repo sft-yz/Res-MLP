@@ -22,10 +22,10 @@ from scipy.io import savemat
 np.random.seed(42)
 tf.random.set_seed(42)
 
-# =================== 基础目录 ===================
+# =================== 基础目录（与原脚本一致） ===================
 BASE_DIR     = '/root/autodl-tmp/my_project'
 DATA_DIR     = os.path.join(BASE_DIR, '24')
-OUTPUT_DIR   = os.path.join(BASE_DIR, 'Res')
+OUTPUT_DIR   = os.path.join(BASE_DIR, 'mha_24')
 IMG_SAVE_DIR = os.path.join(OUTPUT_DIR, 'pngs')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -34,7 +34,9 @@ BEST_MODEL_PATH = os.path.join(OUTPUT_DIR, 'best_model.keras')
 SCALER_PATH     = os.path.join(OUTPUT_DIR, 'scaler.joblib')
 GLOBAL_RANGE_NPY= os.path.join(OUTPUT_DIR, 'global_pot_range.npy')
 
-# =================== 数据加载 ===================
+print("🔍 开始加载数据...")
+
+# =================== 数据加载（保持原逻辑） ===================
 all_files = sorted([f for f in os.listdir(DATA_DIR) if f.endswith('_Match_Omni_SD_Pot.mat')])
 mat_files = all_files
 
@@ -80,7 +82,7 @@ features      = np.vstack(feat_list).astype(np.float32)
 pos_arr       = np.vstack(pos_list).astype(np.float32)
 ut_arr        = np.array(ut_list, dtype=np.float32)
 
-# =================== 编码 ===================
+# =================== 傅里叶编码（保持原逻辑） ===================
 K_geo = 4
 K_mlt = 2
 K_lat = 2
@@ -113,6 +115,9 @@ pot_values    = np.array(pot_list, dtype=np.float32)
 frame_indices = np.array(frame_idx_list, dtype=np.int32)
 total_frames  = len(timestamps)
 
+print(f"📂 加载完毕，总帧数：{total_frames}，总点数：{features.shape[0]}")
+
+# =================== 按帧划分训练/验证（保持原逻辑） ===================
 train_end = int(0.80 * total_frames)
 train_mask = frame_indices < train_end
 val_mask   = (frame_indices >= train_end) 
@@ -120,12 +125,15 @@ val_mask   = (frame_indices >= train_end)
 X_train, y_train = X_all[train_mask], pot_values[train_mask]
 X_val,   y_val   = X_all[val_mask],   pot_values[val_mask]
 
+# =================== 归一化 & 保存全局电位范围 ===================
 scaler = MinMaxScaler().fit(X_train)
 X_train_norm = scaler.transform(X_train)
 X_val_norm   = scaler.transform(X_val)
 dump(scaler, SCALER_PATH)
+print(f"💾 已保存归一化器")
 
 global_min, global_max = y_train.min(), y_train.max()
+print(f"[在线统计] 训练集全局电位范围：min={global_min:.3f}, max={global_max:.3f}")
 np.save(GLOBAL_RANGE_NPY, np.array([global_min, global_max], dtype=np.float32))
 
 y_train_norm = (y_train - global_min) / (global_max - global_min)
@@ -135,6 +143,7 @@ np.save(os.path.join(OUTPUT_DIR, 'X_train_norm.npy'), X_train_norm)
 np.save(os.path.join(OUTPUT_DIR, 'y_train_norm.npy'), y_train_norm)
 np.save(os.path.join(OUTPUT_DIR, 'X_val_norm.npy'), X_val_norm)
 np.save(os.path.join(OUTPUT_DIR, 'y_val_norm.npy'), y_val_norm)
+print("💾 已将归一化数据保存为 .npy（用于 memmap 加载）")
 
 def safe_load_memmap(path):
     try:
@@ -142,6 +151,7 @@ def safe_load_memmap(path):
         print(f"Loaded memmap: {path} -> shape={mm.shape}, dtype={mm.dtype}")
         return mm
     except Exception as e:
+        print(f"⚠️ memmap 加载失败 {path} ({e})，退回到完整加载")
         arr = np.load(path)
         print(f"Loaded full array: {path} -> shape={arr.shape}, dtype={arr.dtype}")
         return arr
@@ -152,7 +162,7 @@ X_val_mm   = safe_load_memmap(os.path.join(OUTPUT_DIR, 'X_val_norm.npy'))
 y_val_mm   = safe_load_memmap(os.path.join(OUTPUT_DIR, 'y_val_norm.npy'))
 
 USE_SUBSAMPLED_FILE = True          
-SUBSAMPLED_TRAIN_SAMPLES = 75_000_000 
+SUBSAMPLED_TRAIN_SAMPLES = 75_000_000  
 
 BATCH_SIZE = 2048  
 SHUFFLE_BUFFER = 200000  
@@ -186,6 +196,7 @@ if USE_SUBSAMPLED_FILE:
         rng = np.random.default_rng(seed=42)
         selected_idx = rng.choice(n_train, size=target, replace=False)
 
+        # 分块写入 open_memmap
         try:
             out_dim = int(X_train_mm.shape[1])
             X_out_mm = open_memmap(out_X_path, mode='w+', dtype='float32', shape=(target, out_dim))
@@ -202,11 +213,10 @@ if USE_SUBSAMPLED_FILE:
                 write_ptr += (end - start)
                 if write_ptr % (10*chunk) == 0 or write_ptr == target:
                     elapsed = time.time() - t0
-                  
+
             del X_out_mm, y_out_mm
             elapsed_total = time.time() - t0
-          
-     
+
             X_train_sub_mm = np.load(out_X_path, mmap_mode='r')
             y_train_sub_mm = np.load(out_y_path, mmap_mode='r')
             print(f"Loaded subsampled memmap shapes: X={X_train_sub_mm.shape}, y={y_train_sub_mm.shape}")
@@ -217,6 +227,7 @@ if USE_SUBSAMPLED_FILE:
                     try:
                         os.remove(p)
                     except Exception as e2:
+                        print(f"无法删除 {p}: {e2}")
             for p in (out_X_path, out_y_path):
                 bak = p + '.bak.' + datetime.datetime.now().strftime('%Y%m%d%H%M%S')
             raise
@@ -224,6 +235,7 @@ else:
     X_train_sub_mm = X_train_mm
     y_train_sub_mm = y_train_mm
 
+# =================== 构造 tf.data 数据集 ===================
 import math
 
 def make_dataset_from_memmap(X_mm, y_mm, batch_size=BATCH_SIZE, shuffle=False):
@@ -240,45 +252,55 @@ train_ds = make_dataset_from_memmap(X_train_sub_mm, y_train_sub_mm, batch_size=B
 steps_per_epoch = math.ceil(X_train_sub_mm.shape[0] / BATCH_SIZE)
 
 # ==================== 第三步：模型定义与训练 ====================
-def build_resmlp(input_dim, hidden_dim=64, depth=3, dropout=0.2):
+def build_mha_mlp(input_dim=23, num_heads=4, key_dim=32, mlp_units=[128, 64], dropout=0.2):
     """
-    Residual MLP with LayerNorm + GELU.
-    hidden_dim: 隐藏层大小（128）
-    depth: 残差块数量（可调）
-    dropout: dropout 比例
+    多头注意力增强的MLP
+    使用注意力机制重新加权特征重要性
     """
-    x_in = layers.Input(shape=(input_dim,))
-    x = layers.Dense(hidden_dim)(x_in)
-    x = layers.LayerNormalization()(x)
-    x = layers.Activation('gelu')(x)
+    inputs = layers.Input(shape=(input_dim,))
+    
+    # 特征重投影为多个头
+    projected = layers.Dense(num_heads * key_dim)(inputs)
+    projected = layers.Reshape((num_heads, key_dim))(projected)
+    
+    # 多头注意力 - 学习特征间的重要性权重
+    attention_weights = layers.Softmax(axis=-1)(projected)  # [batch, num_heads, key_dim]
+    
+    # 注意力加权
+    attended = layers.Multiply()([projected, attention_weights])
+    attended = layers.Reshape((num_heads * key_dim,))(attended)
+    
+    # 融合层
+    fused = layers.Dense(mlp_units[0], activation='gelu')(attended)
+    fused = layers.LayerNormalization()(fused)
+    fused = layers.Dropout(dropout)(fused)
+    
+    # 深度处理
+    for units in mlp_units[1:]:
+        fused = layers.Dense(units, activation='gelu')(fused)
+        fused = layers.LayerNormalization()(fused)
+        fused = layers.Dropout(dropout)(fused)
+    
+    outputs = layers.Dense(1)(fused)
+    
+    return models.Model(inputs=inputs, outputs=outputs)
 
-    for _ in range(depth):
-        shortcut = x
-        x = layers.Dense(hidden_dim)(x)
-        x = layers.LayerNormalization()(x)
-        x = layers.Activation('gelu')(x)
-        x = layers.Dropout(dropout)(x)
-        x = layers.Add()([x, shortcut])
 
-    x = layers.Dense(hidden_dim // 2, activation='gelu')(x)
-    x = layers.LayerNormalization()(x)
-    x = layers.Dropout(dropout)(x)
-    out = layers.Dense(1)(x)
-
-    return models.Model(inputs=x_in, outputs=out)
-
-input_dim = 6 + 1 + 2*K_geo + 2*K_mlt + 2*K_lat  
-model = build_resmlp(input_dim=input_dim, hidden_dim=128, depth=3, dropout=0.2)
-model.compile(
-    optimizer='adam',
-    loss='mse',
-    metrics=['mae', tf.keras.metrics.MeanSquaredError(name='mse')]
+input_dim = 6 + 1 + 2*K_geo + 2*K_mlt + 2*K_lat   # 6 全局 + 1 lat原始 + 三套傅里叶
+model = build_mha_mlp(
+    input_dim=input_dim, 
+    num_heads=4, 
+    key_dim=32, 
+    mlp_units=[128, 64], 
+    dropout=0.2
 )
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])  
 model.summary()
 
 es = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 cp = ModelCheckpoint(BEST_MODEL_PATH, monitor='val_loss', save_best_only=True)
 
+# =================== 训练 ===================
 history = model.fit(
     train_ds,
     validation_data=val_ds,
@@ -288,42 +310,4 @@ history = model.fit(
     steps_per_epoch=steps_per_epoch
 )
 
-hist_df = pd.DataFrame(history.history)
-history_csv_path = os.path.join(OUTPUT_DIR, 'training_history.csv')
-hist_npy_path = os.path.join(OUTPUT_DIR, 'training_history.npy')
-hist_df.to_csv(history_csv_path, index=False)
-np.save(hist_npy_path, history.history)
-
-train_mse = history.history.get('mse', history.history.get('loss'))
-val_mse   = history.history.get('val_mse', history.history.get('val_loss'))
-train_mae = history.history.get('mae')
-val_mae   = history.history.get('val_mae')
-
-epochs = range(1, len(history.history[list(history.history.keys())[0]]) + 1)
-
-fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-# MSE / loss
-axes[0].plot(epochs, train_mse, label='train MSE')
-if val_mse is not None:
-    axes[0].plot(epochs, val_mse, label='val MSE')
-axes[0].set_ylabel('MSE')
-axes[0].set_title('Training MSE (loss)')
-axes[0].legend()
-axes[0].grid(True)
-
-# MAE
-if train_mae is not None:
-    axes[1].plot(epochs, train_mae, label='train MAE')
-if val_mae is not None:
-    axes[1].plot(epochs, val_mae, label='val MAE')
-axes[1].set_xlabel('Epoch')
-axes[1].set_ylabel('MAE')
-axes[1].set_title('Training MAE')
-axes[1].legend()
-axes[1].grid(True)
-
-plt.tight_layout()
-os.makedirs(IMG_SAVE_DIR, exist_ok=True)
-plot_path = os.path.join(IMG_SAVE_DIR, 'mse_mae_training_curve.png')
-fig.savefig(plot_path, dpi=150)
-plt.close(fig)
+print("✅ 多头注意力MLP模型训练完成")
