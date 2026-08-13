@@ -1,0 +1,16 @@
+20240122_Match_Omni_SD_Pot.mat
+This file contains one day of sample data.
+
+mlp_main.py
+mha_main.py
+Res_main.py
+These three scripts define and train the MLP, MHA-MLP, and Res-MLP models, respectively. After training, each model outputs the following files: best_model.keras, global_pot_range.npy, and scaler.joblib.
+
+predict_metrics_test.py
+This script reads the .mat files corresponding to the test dataset and the model files (best_model.keras, global_pot_range.npy, and scaler.joblib). It calculates the error metrics between the predicted and measured-truth results for all time steps in the test set and saves the results as metrics.csv.
+
+ab_plot.py
+This script generates the composite figures containing subplots (a) and (b) for Figures 6 and 7. It reads the .mat data files and the model files (best_model.keras, global_pot_range.npy, and scaler.joblib).
+
+qualitative_9plot.py
+This script takes six input parameters and the corresponding UT as inputs, loads the Res-MLP model, generates the Res-MLP prediction, and combines the results into a 3 × 3 nine-panel figure.
